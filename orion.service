@@ -1,0 +1,56 @@
+# /etc/systemd/system/orion.service
+#
+# Servicio systemd para ORION Robot (asistente de voz headless).
+# Depende de orion-api.service — arranca después de que la API esté lista.
+#
+# Instalación:
+#   sudo cp orion.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable orion
+#   sudo systemctl start orion
+#
+# Comandos útiles:
+#   sudo systemctl status orion
+#   sudo journalctl -u orion -f
+#   sudo systemctl restart orion
+
+[Unit]
+Description=ORION Robot — Asistente de voz headless
+# Esperar a que la API interna, la red y el audio estén listos
+After=network.target sound.target pulseaudio.service orion-api.service
+Wants=pulseaudio.service
+Requires=orion-api.service
+
+[Service]
+# ── Usuario ───────────────────────────────────────────────────────────────────
+# Cambiar "pi" por el usuario real de tu RPi si es diferente
+User=pi
+Group=pi
+
+# ── Directorio y entorno ──────────────────────────────────────────────────────
+WorkingDirectory=/home/pi/orion2
+ExecStart=/home/pi/orion2/.venv/bin/python main_robot.py
+EnvironmentFile=/home/pi/orion2/.env
+
+# ── Audio: apuntar al servidor PulseAudio del usuario ────────────────────────
+Environment=PULSE_SERVER=unix:/run/user/1000/pulse/native
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+
+# ── Reinicio automático ───────────────────────────────────────────────────────
+Restart=on-failure
+RestartSec=5s
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=orion
+
+# ── Tiempo máximo de arranque ─────────────────────────────────────────────────
+# El modelo Vosk grande (1.8GB) puede tardar ~20s en cargar en RPi 4
+TimeoutStartSec=60s
+
+# ── Seguridad ─────────────────────────────────────────────────────────────────
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

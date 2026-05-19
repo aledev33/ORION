@@ -1,0 +1,59 @@
+# /etc/systemd/system/orion-api.service
+#
+# Servicio systemd para la API interna de ORION (FastAPI + MariaDB).
+# Debe arrancar ANTES que orion.service — ORION depende de esta API
+# para cargar el catálogo de apps y guardar el historial de comandos.
+#
+# Instalación:
+#   sudo cp orion-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable orion-api
+#   sudo systemctl start orion-api
+#
+# Comandos útiles:
+#   sudo systemctl status orion-api
+#   sudo journalctl -u orion-api -f
+#   curl http://127.0.0.1:8000/health    ← verificar que responde
+
+[Unit]
+Description=ORION API — FastAPI backend (MariaDB)
+After=network.target mariadb.service
+Requires=mariadb.service
+
+[Service]
+# ── Usuario ───────────────────────────────────────────────────────────────────
+# Cambiar "pi" por el usuario real de tu RPi si es diferente
+User=pi
+Group=pi
+
+# ── Directorio y entorno ──────────────────────────────────────────────────────
+WorkingDirectory=/home/pi/orion2
+EnvironmentFile=/home/pi/orion2/.env
+
+# Uvicorn escucha en todas las interfaces para que la GUI de la laptop
+# pueda conectarse por Tailscale. El firewall de la RPi o Tailscale ACLs
+# controlan quién puede acceder.
+ExecStart=/home/pi/orion2/.venv/bin/uvicorn \
+    orion.orion_api.app.main:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 1 \
+    --log-level warning
+
+# ── Reinicio automático ───────────────────────────────────────────────────────
+Restart=on-failure
+RestartSec=5s
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=orion-api
+
+# ── Tiempo máximo de arranque ─────────────────────────────────────────────────
+TimeoutStartSec=30s
+
+# ── Seguridad ─────────────────────────────────────────────────────────────────
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

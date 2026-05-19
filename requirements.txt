@@ -1,0 +1,44 @@
+# ─────────────────────────────────────────────
+# ORION — dependencias completas
+# ─────────────────────────────────────────────
+# Instalar con:
+#   pip install -r requirements.txt
+#
+# En Windows también ejecutar:
+#   pip install -r requirements-windows.txt
+#
+# En Raspberry Pi / Linux también ejecutar:
+#   pip install -r requirements-linux.txt
+# ─────────────────────────────────────────────
+ 
+# --- Audio (STT) ---
+vosk
+sounddevice
+ 
+# --- TTS ---
+pyttsx3
+ 
+# --- NLU / ML ---
+scikit-learn
+joblib
+ 
+# --- Fuzzy matching (apps) ---
+rapidfuzz
+ 
+# --- Web search ---
+requests
+ 
+# --- API (backend) ---
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+pydantic-settings
+pymysql          # driver MariaDB/MySQL para SQLAlchemy
+ 
+# --- GUI ---
+PySide6
+ 
+# --- Screenshot ---
+pyautogui
+Pillow           # requerido por pyautogui para guardar imágenes

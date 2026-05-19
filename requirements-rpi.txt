@@ -1,0 +1,67 @@
+# requirements-rpi.txt
+#
+# ORION — dependencias para Raspberry Pi 4 (aarch64, Debian Trixie)
+#
+# Instalar con:
+#   pip install -r requirements-rpi.txt --break-system-packages
+#
+# Paquetes del sistema necesarios (instalar primero con apt):
+#   sudo apt install -y \
+#       espeak-ng \
+#       portaudio19-dev \
+#       python3-pyaudio \
+#       alsa-utils \
+#       pulseaudio \
+#       scrot \
+#       libgirepository1.0-dev \
+#       i2c-tools \
+#       python3-smbus
+#
+# Para la pantalla OLED SSD1306 (I2C):
+#   sudo apt install -y python3-pil python3-pil.imagetk
+#   sudo raspi-config → Interface Options → I2C → Enable
+#
+# Para Piper TTS — seguir instrucciones en orion/tts/speaker.py
+ 
+# ── STT (reconocimiento de voz) ───────────────────────────────────────────────
+vosk
+sounddevice
+ 
+# ── TTS (síntesis de voz) ─────────────────────────────────────────────────────
+# Piper se instala como binario independiente, no como paquete pip.
+# Ver instrucciones en orion/tts/speaker.py
+# Mantenemos pyttsx3 SOLO como fallback de emergencia si Piper no arranca.
+pyttsx3
+ 
+# ── NLU / ML ─────────────────────────────────────────────────────────────────
+scikit-learn
+joblib
+ 
+# ── Fuzzy matching (apps) ─────────────────────────────────────────────────────
+rapidfuzz
+ 
+# ── Web search / HTTP ────────────────────────────────────────────────────────
+requests
+ 
+# ── Backend API (FastAPI + MariaDB) ──────────────────────────────────────────
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+pydantic-settings
+pymysql
+ 
+# ── Control de volumen Linux ─────────────────────────────────────────────────
+pulsectl
+ 
+# ── Pantalla OLED SSD1306 ─────────────────────────────────────────────────────
+luma.oled
+Pillow
+ 
+# ── Variables de entorno ─────────────────────────────────────────────────────
+python-dotenv
+ 
+# ── NO incluidos (solo Windows/laptop) ───────────────────────────────────────
+# PySide6      → GUI eliminada en RPi
+# pyautogui    → no disponible en headless, screenshots via scrot
+# pycaw        → solo Windows (control de volumen)

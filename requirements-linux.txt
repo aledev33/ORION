@@ -1,0 +1,15 @@
+# ─────────────────────────────────────────────
+# ORION — dependencias exclusivas de Linux / Raspberry Pi
+# ─────────────────────────────────────────────
+# Solo instalar en Linux/Raspberry Pi:
+#   pip install -r requirements-linux.txt
+#
+# También necesitas estos paquetes del sistema (apt):
+#   sudo apt install -y espeak espeak-ng \
+#       portaudio19-dev python3-pyaudio \
+#       libgirepository1.0-dev scrot \
+#       alsa-utils pulseaudio
+# ─────────────────────────────────────────────
+ 
+# Control de volumen en Linux vía PulseAudio/ALSA
+pulsectl         # control de volumen PulseAudio desde Python
