@@ -32,6 +32,7 @@ INTENT_THRESHOLDS = {
     "WEB_SEARCH":     0.60,
     "SYSTEM_CONTROL": 0.70,
     "SMALL_TALK":     0.30,
+    "TAKE_PHOTO":     0.50,
     "UNKNOWN":        1.00,
 }
 

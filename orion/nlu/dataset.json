@@ -641,6 +641,34 @@
 
 
 
+  {"text": "toma una foto", "label": "TAKE_PHOTO"},
+  {"text": "saca una foto", "label": "TAKE_PHOTO"},
+  {"text": "toma una fotografia", "label": "TAKE_PHOTO"},
+  {"text": "saca una fotografia", "label": "TAKE_PHOTO"},
+  {"text": "toma una fotografía", "label": "TAKE_PHOTO"},
+  {"text": "captura una imagen", "label": "TAKE_PHOTO"},
+  {"text": "toma la foto", "label": "TAKE_PHOTO"},
+  {"text": "saca la foto", "label": "TAKE_PHOTO"},
+  {"text": "foto", "label": "TAKE_PHOTO"},
+  {"text": "tomar foto", "label": "TAKE_PHOTO"},
+  {"text": "hazme una foto", "label": "TAKE_PHOTO"},
+  {"text": "quiero una foto", "label": "TAKE_PHOTO"},
+  {"text": "toma una imagen", "label": "TAKE_PHOTO"},
+  {"text": "captura una foto", "label": "TAKE_PHOTO"},
+  {"text": "saca una imagen", "label": "TAKE_PHOTO"},
+  {"text": "fotografía", "label": "TAKE_PHOTO"},
+  {"text": "fotografia", "label": "TAKE_PHOTO"},
+  {"text": "tomate una foto", "label": "TAKE_PHOTO"},
+  {"text": "toma foto", "label": "TAKE_PHOTO"},
+  {"text": "haz una foto", "label": "TAKE_PHOTO"},
+  {"text": "dispara la camara", "label": "TAKE_PHOTO"},
+  {"text": "usa la camara", "label": "TAKE_PHOTO"},
+  {"text": "activa la camara", "label": "TAKE_PHOTO"},
+  {"text": "saca foto", "label": "TAKE_PHOTO"},
+  {"text": "toma una captura de camara", "label": "TAKE_PHOTO"},
+
+
+
   {"text": "aparte", "label": "UNKNOWN"},
   {"text": "a ver", "label": "UNKNOWN"},
   {"text": "mmm", "label": "UNKNOWN"},

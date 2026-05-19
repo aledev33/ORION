@@ -145,6 +145,12 @@ def es_small_talk_directo(t: str) -> bool:
         "como estas", "quien eres", "gracias",
         "que puedes hacer", "que haces", "para que sirves",
         "me escuchas", "estas ahi",
+        "como te llamas", "cual es tu nombre",
+        "cuentame un chiste", "dime un chiste", "un chiste",
+        "que hora es", "que dia es", "que fecha es",
+        "adios", "hasta luego", "bye", "chao",
+        "como andas", "que onda", "que tal",
+        "eres inteligente", "cuantos anos tienes",
     ]
     return any(k in t for k in claves)
  
@@ -214,6 +220,8 @@ def decidir_accion_ml(comando: str, classifier) -> tuple[str, str, float]:
  
     if intent == "SMALL_TALK":
         return (intent, "smalltalk", conf)
- 
+
+    if intent == "TAKE_PHOTO":
+        return (intent, "", conf)
+
     return ("UNKNOWN", "", conf)
- 

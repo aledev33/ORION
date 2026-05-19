@@ -1,23 +1,23 @@
 # orion/audio/listener.py
 import json
 import queue
+import re
 import numpy as np
 import soxr
 import sounddevice as sd
 from vosk import Model, KaldiRecognizer
 
-# Frecuencia nativa del micrófono USB
 _DEVICE_RATE = 44100
-# Frecuencia requerida por Vosk
 _VOSK_RATE   = 16000
-# Tamaño de bloque a 44100Hz equivalente a ~125ms
-_BLOCKSIZE   = int(_DEVICE_RATE * 0.125)
+_BLOCKSIZE   = int(_DEVICE_RATE * 0.125)  # ~125ms por bloque
+
+_HOTWORDS = ["orion", "orión"]
 
 
 class Listener:
     def __init__(self, model_path: str, sample_rate: int = 16000, device=None):
         self.model       = Model(model_path)
-        self.sample_rate = _VOSK_RATE   # Vosk siempre recibe 16000Hz
+        self.sample_rate = _VOSK_RATE
         self.device      = device
         self._audio_queue: queue.Queue = queue.Queue()
 
@@ -34,8 +34,6 @@ class Listener:
 
     def _callback(self, indata, frames, time_info, status):
         try:
-            # indata es float32 desde sounddevice — convertir a int16 para Vosk
-            # Primero resamplear de 44100 → 16000
             audio_f32   = indata[:, 0].copy()
             resampled   = soxr.resample(audio_f32, _DEVICE_RATE, _VOSK_RATE)
             audio_int16 = (resampled * 32767).astype(np.int16)
@@ -50,14 +48,18 @@ class Listener:
             except queue.Empty:
                 break
 
-    # ── Motor principal de escucha ────────────────────────────────────────────
+    # ── Motor base de escucha ─────────────────────────────────────────────────
 
-    def _escuchar_con_recognizer(self, recognizer, segundos_max: int) -> str:
+    def _escuchar_con_recognizer(self, recognizer, segundos_max: int,
+                                  max_silencio: int = 8) -> str:
+        """
+        max_silencio: bloques de silencio antes de cortar (~125ms cada uno)
+        Por defecto 8 bloques = ~1s de silencio
+        """
         self._clear_queue()
         partes: list[str] = []
         bloques_max      = int(segundos_max / 0.125) + 1
         bloques_silencio = 0
-        MAX_SILENCIO     = 12  # ~1.5s de silencio antes de cortar
 
         try:
             with sd.InputStream(
@@ -73,7 +75,7 @@ class Listener:
                         data = self._audio_queue.get(timeout=0.5)
                     except queue.Empty:
                         bloques_silencio += 1
-                        if partes and bloques_silencio >= MAX_SILENCIO:
+                        if partes and bloques_silencio >= max_silencio:
                             break
                         continue
 
@@ -85,18 +87,16 @@ class Listener:
                         if texto:
                             partes.append(texto)
 
-                # Capturar lo que quedó en el buffer final de Vosk
-                final            = json.loads(recognizer.FinalResult())
-                texto_final_vosk = (final.get("text") or "").strip()
-                if texto_final_vosk:
-                    partes.append(texto_final_vosk)
+                final = json.loads(recognizer.FinalResult())
+                texto_final = (final.get("text") or "").strip()
+                if texto_final:
+                    partes.append(texto_final)
 
         except Exception as e:
             print(f"[Listener] Error de audio: {e}")
             return ""
 
-        texto_completo = " ".join(partes).strip()
-        return _deduplicar(texto_completo)
+        return _deduplicar(" ".join(partes).strip())
 
     # ── API pública ───────────────────────────────────────────────────────────
 
@@ -109,7 +109,7 @@ class Listener:
             texto = self.escuchar(segundos_max=segundos_por_intento)
             if texto and texto.strip():
                 return texto.strip()
-            print(f"[Listener] Intento {intento + 1}/{intentos}: no se captó texto, reintentando...")
+            print(f"[Listener] Intento {intento + 1}/{intentos}: sin texto, reintentando...")
         return ""
 
     def escuchar_con_gramatica(self, palabras_o_frases: list[str], segundos_max: int = 5) -> str:
@@ -120,6 +120,41 @@ class Listener:
         grammar    = json.dumps(grammar_list, ensure_ascii=False)
         recognizer = KaldiRecognizer(self.model, self.sample_rate, grammar)
         return self._escuchar_con_recognizer(recognizer, segundos_max)
+
+    def escuchar_hotword_y_comando(self, segundos_max: int = 8) -> tuple[bool, str]:
+        """
+        Escucha continua que detecta hotword + comando en una sola frase.
+        Retorna (hotword_detectada, comando).
+
+        Ejemplos:
+          "Orion qué es la luna"  → (True, "qué es la luna")
+          "Orion"                 → (True, "")
+          "hola qué tal"          → (False, "")
+        """
+        recognizer = KaldiRecognizer(self.model, self.sample_rate)
+        # Silencio corto para responder rápido: 6 bloques = ~0.75s
+        texto = self._escuchar_con_recognizer(
+            recognizer, segundos_max=segundos_max, max_silencio=6
+        )
+
+        if not texto:
+            return False, ""
+
+        texto_lower = texto.lower().strip()
+        hotword_encontrada = any(hw in texto_lower for hw in _HOTWORDS)
+
+        if not hotword_encontrada:
+            return False, ""
+
+        # Extraer el comando quitando la hotword del inicio
+        comando = texto_lower
+        for hw in _HOTWORDS:
+            # Quitar hotword al inicio con posible coma/espacio
+            comando = re.sub(
+                r"^" + hw + r"[,\s]*", "", comando, flags=re.IGNORECASE
+            ).strip()
+
+        return True, comando
 
 
 # ── Utilidades ────────────────────────────────────────────────────────────────

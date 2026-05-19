@@ -212,31 +212,19 @@ class OrionAssistant:
                 print("\n[Escuchando...]")
                 self.display.set_estado(OrionEstado.INACTIVO)
 
-                # Escucha continua — captura "Orion que es la luna" de una vez
-                texto = self.context.listener.escuchar_hasta_texto(
-                    intentos=1,
-                    segundos_por_intento=config.LISTENER_HOTWORD_SECONDS + config.LISTENER_COMMAND_SECONDS,
+                # Escucha hotword + comando en una sola frase
+                hotword, comando = self.context.listener.escuchar_hotword_y_comando(
+                    segundos_max=config.LISTENER_HOTWORD_SECONDS + config.LISTENER_COMMAND_SECONDS,
                 )
-                print("[DEBUG] Oido:", texto)
 
-                if not texto:
+                if not hotword:
                     continue
 
-                # Verificar si contiene la hotword
-                texto_lower = texto.lower().strip()
-                hotword_detectada = any(hw in texto_lower for hw in ["orion", "orion"])
-
-                if not hotword_detectada:
-                    continue
-
-                # Extraer comando quitando la hotword y puntuacion
-                import re
-                comando = re.sub(r"^(orion)[,\s]+", "", texto_lower, flags=re.IGNORECASE).strip()
                 print("[DEBUG] Hotword detectada. Comando:", comando)
-                self.context.logger.guardar(frase=texto, accion="HOTWORD:DETECTADO")
+                self.context.logger.guardar(frase="orion " + comando, accion="HOTWORD:DETECTADO")
                 self.display.set_estado(OrionEstado.ESCUCHANDO)
 
-                # Si no hay comando en la misma frase, pedir que lo diga
+                # Si no vino comando en la misma frase, pedir que lo diga
                 if not comando or len(comando) < 2:
                     self.context.speaker.decir("Que necesitas?")
                     print("[Escuchando comando...]")
