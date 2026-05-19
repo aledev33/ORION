@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ORION</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #111318;
+    color: #e8eaf0;
+    height: 100vh;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ── Barra de título ── */
+  .titlebar {
+    -webkit-app-region: drag;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    background: #0d0f14;
+    border-bottom: 1px solid #1e2230;
+    position: relative;
+    z-index: 100;
+  }
+  .titlebar-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: #5b8cff;
+  }
+  .titlebar-controls {
+    -webkit-app-region: no-drag;
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+  }
+  .titlebar-btn {
+    width: 28px; height: 28px;
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s;
+  }
+  .titlebar-btn:hover { background: #1e2230; color: #e8eaf0; }
+  .titlebar-btn.close:hover { background: #c0392b; color: white; }
+
+  /* ── Layout principal ── */
+  .app {
+    display: flex;
+    height: calc(100vh - 36px);
+  }
+
+  /* ── Panel izquierdo — Logo ORION ── */
+  .left-panel {
+    width: 55%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background: #0d0f14;
+    border-right: 1px solid #1e2230;
+  }
+
+  .orion-logo-wrap {
+    position: relative;
+    width: 260px;
+    height: 260px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Anillos de glow */
+  .glow-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    animation: ring-pulse 3s ease-in-out infinite;
+  }
+  .glow-ring-1 {
+    width: 280px; height: 280px;
+    border-color: rgba(80, 140, 255, 0.15);
+    animation-delay: 0s;
+  }
+  .glow-ring-2 {
+    width: 310px; height: 310px;
+    border-color: rgba(180, 80, 255, 0.08);
+    animation-delay: 1s;
+  }
+  .glow-ring-3 {
+    width: 340px; height: 340px;
+    border-color: rgba(80, 140, 255, 0.05);
+    animation-delay: 2s;
+  }
+
+  @keyframes ring-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.5; }
+    50% { transform: scale(1.04); opacity: 1; }
+  }
+
+  .orion-logo {
+    width: 220px;
+    height: 220px;
+    border-radius: 50%;
+    object-fit: cover;
+    position: relative;
+    z-index: 2;
+    filter: drop-shadow(0 0 30px rgba(80, 140, 255, 0.4));
+    animation: logo-float 4s ease-in-out infinite;
+    transition: filter 0.5s;
+  }
+
+  @keyframes logo-float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+  }
+
+  /* Estado animado del logo */
+  .orion-logo.escuchando {
+    filter: drop-shadow(0 0 40px rgba(0, 220, 100, 0.7));
+    animation: logo-float 4s ease-in-out infinite, logo-pulse-green 1s ease-in-out infinite;
+  }
+  .orion-logo.procesando {
+    filter: drop-shadow(0 0 40px rgba(80, 160, 255, 0.7));
+    animation: logo-spin-glow 2s linear infinite;
+  }
+  .orion-logo.hablando {
+    filter: drop-shadow(0 0 40px rgba(180, 80, 255, 0.7));
+    animation: logo-float 1s ease-in-out infinite;
+  }
+
+  @keyframes logo-pulse-green {
+    0%, 100% { filter: drop-shadow(0 0 30px rgba(0, 220, 100, 0.5)); }
+    50% { filter: drop-shadow(0 0 60px rgba(0, 220, 100, 0.9)); }
+  }
+  @keyframes logo-spin-glow {
+    0% { filter: drop-shadow(0 0 40px rgba(80, 160, 255, 0.7)); transform: translateY(-5px) rotate(0deg); }
+    100% { filter: drop-shadow(0 0 40px rgba(80, 160, 255, 0.7)); transform: translateY(-5px) rotate(360deg); }
+  }
+
+  .orion-status {
+    margin-top: 24px;
+    font-size: 13px;
+    color: #6b7280;
+    letter-spacing: 1px;
+    transition: color 0.3s;
+    height: 20px;
+  }
+  .orion-status.active { color: #5b8cff; }
+
+  /* ── Panel derecho — Chat ── */
+  .right-panel {
+    width: 45%;
+    display: flex;
+    flex-direction: column;
+    background: #111318;
+  }
+
+  .chat-header {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid #1e2230;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .chat-header-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: #5b8cff;
+    letter-spacing: 2px;
+  }
+  .chat-header-you {
+    font-size: 13px;
+    font-weight: 600;
+    color: #6b7280;
+  }
+
+  /* Botón panel de control */
+  .btn-panel {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    border: 1px solid #1e2230;
+    background: #0d0f14;
+    color: #3a4060;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+    z-index: 10;
+  }
+  .btn-panel:hover { border-color: #5b8cff; color: #5b8cff; background: #0d1020; }
+
+  /* ── Mensajes ── */
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    scrollbar-width: thin;
+    scrollbar-color: #1e2230 transparent;
+  }
+
+  .message {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-width: 85%;
+  }
+  .message.orion { align-self: flex-start; }
+  .message.user  { align-self: flex-end; }
+
+  .message-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: #3a4060;
+    text-transform: uppercase;
+  }
+  .message.orion .message-label { color: #5b8cff88; }
+  .message.user  .message-label { color: #6b728088; text-align: right; }
+
+  .message-bubble {
+    padding: 10px 14px;
+    border-radius: 14px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .message.orion .message-bubble {
+    background: #181c28;
+    border: 1px solid #1e2230;
+    color: #c8cfe0;
+    border-radius: 4px 14px 14px 14px;
+  }
+  .message.user .message-bubble {
+    background: #1a2550;
+    border: 1px solid #253060;
+    color: #e8eaf0;
+    border-radius: 14px 4px 14px 14px;
+  }
+
+  .message-typing .message-bubble {
+    display: flex; gap: 4px; align-items: center;
+    padding: 12px 16px;
+  }
+  .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #5b8cff;
+    animation: dot-bounce 1.2s ease-in-out infinite;
+  }
+  .dot:nth-child(2) { animation-delay: 0.2s; }
+  .dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes dot-bounce {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+  }
+
+  /* ── Input ── */
+  .chat-input-area {
+    padding: 12px 16px;
+    border-top: 1px solid #1e2230;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .chat-input {
+    flex: 1;
+    background: #0d0f14;
+    border: 1px solid #1e2230;
+    border-radius: 10px;
+    padding: 10px 14px;
+    color: #e8eaf0;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .chat-input:focus { border-color: #5b8cff44; }
+  .chat-input::placeholder { color: #3a4060; }
+
+  .btn-send {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: none;
+    background: #5b8cff;
+    color: white;
+    cursor: pointer;
+    font-size: 15px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.2s, transform 0.1s;
+    flex-shrink: 0;
+  }
+  .btn-send:hover { background: #4a7aee; }
+  .btn-send:active { transform: scale(0.95); }
+
+  /* ── Panel de control (overlay) ── */
+  .panel-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 200;
+    backdrop-filter: blur(4px);
+  }
+  .panel-overlay.visible { display: flex; align-items: center; justify-content: center; }
+
+  .panel-modal {
+    width: 720px;
+    max-height: 80vh;
+    background: #111318;
+    border: 1px solid #1e2230;
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .panel-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid #1e2230;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .panel-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #5b8cff;
+  }
+  .panel-close {
+    width: 28px; height: 28px;
+    border: none; background: transparent;
+    color: #6b7280; cursor: pointer; font-size: 16px;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .panel-close:hover { background: #1e2230; color: #e8eaf0; }
+
+  .panel-stats {
+    display: flex;
+    gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid #1e2230;
+  }
+  .stat-card {
+    flex: 1;
+    background: #0d0f14;
+    border: 1px solid #1e2230;
+    border-radius: 10px;
+    padding: 12px 16px;
+    text-align: center;
+  }
+  .stat-num { font-size: 22px; font-weight: 700; color: #5b8cff; }
+  .stat-label { font-size: 10px; color: #6b7280; letter-spacing: 1px; margin-top: 2px; }
+
+  .panel-history {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 20px;
+    scrollbar-width: thin;
+    scrollbar-color: #1e2230 transparent;
+  }
+
+  .history-item {
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin-bottom: 6px;
+    background: #0d0f14;
+    border: 1px solid #1e2230;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    font-size: 12px;
+  }
+  .history-intent {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .history-text { color: #9ba3b8; flex: 1; }
+  .history-time { color: #3a4060; font-size: 10px; flex-shrink: 0; }
+
+  .intent-WEB_SEARCH     { background: #0d2040; color: #5b8cff; }
+  .intent-OPEN_APP       { background: #1a0d40; color: #a080ff; }
+  .intent-SYSTEM_CONTROL { background: #301500; color: #ff9040; }
+  .intent-SMALL_TALK     { background: #0d2515; color: #40c080; }
+  .intent-UNKNOWN        { background: #200d0d; color: #ff6060; }
+  .intent-SYSTEM_EVENT   { background: #1a1a20; color: #6b7280; }
+
+  .connected-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #40c080;
+    display: inline-block;
+    margin-right: 6px;
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+  .connected-dot.off { background: #ff6060; animation: none; }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Barra de título -->
+<div class="titlebar">
+  <span class="titlebar-title">ORION</span>
+  <div class="titlebar-controls">
+    <button class="titlebar-btn" onclick="window.orion.minimize()">─</button>
+    <button class="titlebar-btn close" onclick="window.orion.close()">✕</button>
+  </div>
+</div>
+
+<!-- App principal -->
+<div class="app">
+
+  <!-- Panel izquierdo -->
+  <div class="left-panel">
+    <div class="orion-logo-wrap">
+      <div class="glow-ring glow-ring-1"></div>
+      <div class="glow-ring glow-ring-2"></div>
+      <div class="glow-ring glow-ring-3"></div>
+      <img id="orion-logo" class="orion-logo" src="Logo_ORION.png" alt="ORION">
+    </div>
+    <div id="orion-status" class="orion-status">Esperando...</div>
+
+    <!-- Botón panel de control -->
+    <button class="btn-panel" id="btn-panel" title="Panel de control">⚙</button>
+  </div>
+
+  <!-- Panel derecho (chat) -->
+  <div class="right-panel">
+    <div class="chat-header">
+      <span class="chat-header-name">
+        <span class="connected-dot" id="conn-dot"></span>ORION
+      </span>
+      <span class="chat-header-you">Tú</span>
+    </div>
+
+    <div class="chat-messages" id="chat-messages">
+      <div class="message orion">
+        <span class="message-label">ORION</span>
+        <div class="message-bubble">Hola. Di <strong>"ORION"</strong> para activarme, o escribe un comando aquí.</div>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <input class="chat-input" id="chat-input" type="text"
+        placeholder='Escribe un comando...' autocomplete="off">
+      <button class="btn-send" id="btn-send">↑</button>
+    </div>
+  </div>
+</div>
+
+<!-- Panel de control -->
+<div class="panel-overlay" id="panel-overlay">
+  <div class="panel-modal">
+    <div class="panel-header">
+      <span class="panel-title">PANEL DE CONTROL</span>
+      <button class="panel-close" id="panel-close">✕</button>
+    </div>
+    <div class="panel-stats" id="panel-stats">
+      <div class="stat-card">
+        <div class="stat-num" id="stat-total">—</div>
+        <div class="stat-label">COMANDOS</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" id="stat-errors">—</div>
+        <div class="stat-label">ERRORES</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num" id="stat-apps">—</div>
+        <div class="stat-label">APPS</div>
+      </div>
+    </div>
+    <div class="panel-history" id="panel-history">
+      <div style="color:#3a4060; font-size:12px; text-align:center; padding:20px;">
+        Cargando historial...
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const logo      = document.getElementById('orion-logo')
+const statusEl  = document.getElementById('orion-status')
+const messages  = document.getElementById('chat-messages')
+const input     = document.getElementById('chat-input')
+const connDot   = document.getElementById('conn-dot')
+
+let lastId      = null
+let connected   = false
+let typing      = null
+
+const ESTADOS = {
+  WEB_SEARCH:     { cls: 'procesando', txt: 'Buscando...' },
+  OPEN_APP:       { cls: 'procesando', txt: 'Abriendo aplicación...' },
+  SYSTEM_CONTROL: { cls: 'procesando', txt: 'Ejecutando...' },
+  SMALL_TALK:     { cls: 'hablando',   txt: 'Respondiendo...' },
+  UNKNOWN:        { cls: '',           txt: 'No entendí...' },
+  SYSTEM_EVENT:   { cls: '',           txt: '' },
+}
+
+// ── Parsear payload del API ───────────────────────────────────────────────────
+function parsearItem(item) {
+  const payload = item.payload || ''
+  const rawText = item.raw_text || ''
+  const resp    = item.response_message || ''
+
+  // Detectar hotword
+  if (payload.includes('HOTWORD:DETECTADO')) return { tipo: 'hotword' }
+  if (payload.includes('HOTWORD:') || payload.includes('COMANDO:')) return { tipo: 'ignorar' }
+
+  // Parsear intent real desde payload: "SMALL_TALK_GREETING|OK:True|INTENT:SMALL_TALK|..."
+  let intentReal = ''
+  let respReal   = ''
+  let ok         = false
+
+  const intentMatch = payload.match(/INTENT:([A-Z_]+)/)
+  const okMatch     = payload.match(/OK:(True|False)/)
+
+  if (intentMatch) intentReal = intentMatch[1]
+  if (okMatch)     ok = okMatch[1] === 'True'
+
+  // La respuesta real viene en el campo response_message pero hay que limpiarla
+  // Si tiene el formato "ACTION|OK:...", la respuesta está en el TTS (no en el log)
+  // Buscamos el mensaje en el payload de forma diferente
+  if (resp && !resp.includes('|OK:') && !resp.includes('HOTWORD')) {
+    respReal = resp
+  }
+
+  // Si no hay respuesta limpia, ignorar
+  if (!rawText && !respReal) return { tipo: 'ignorar' }
+  if (!intentReal) return { tipo: 'ignorar' }
+
+  return { tipo: 'comando', intent: intentReal, rawText, resp: respReal, ok }
+}
+
+// ── Polling de comandos ───────────────────────────────────────────────────────
+async function poll() {
+  const res = await window.orion.getCommands(1)
+  if (!res.ok) {
+    setConnected(false)
+    return
+  }
+  setConnected(true)
+  const data = res.data
+  if (!data || !data.length) return
+  const item = data[0]
+  if (item.id === lastId) return
+  lastId = item.id
+
+  const parsed = parsearItem(item)
+
+  if (parsed.tipo === 'hotword') {
+    setEstado('escuchando', 'Escuchando...')
+    return
+  }
+  if (parsed.tipo === 'ignorar') return
+
+  const { intent, rawText, resp, ok } = parsed
+
+  // Mostrar comando del usuario
+  if (rawText && rawText.trim()) addMessage('user', rawText)
+
+  // Estado visual
+  const e = ESTADOS[intent] || { cls: 'procesando', txt: 'Procesando...' }
+  if (e.cls) setEstado(e.cls, e.txt)
+  showTyping()
+
+  setTimeout(async () => {
+    hideTyping()
+
+    // Si hay respuesta en el log úsala, si no busca en el siguiente registro
+    if (resp && resp.trim()) {
+      addMessage('orion', resp)
+    } else {
+      // Buscar respuesta en registros recientes
+      const res2 = await window.orion.getCommands(5)
+      if (res2.ok && res2.data) {
+        for (const it of res2.data) {
+          const p = it.payload || ''
+          const r = it.response_message || ''
+          if (r && !r.includes('|OK:') && !r.includes('HOTWORD') && it.id !== item.id) {
+            addMessage('orion', r)
+            break
+          }
+        }
+      }
+    }
+    setTimeout(() => setEstado('idle', 'Esperando...'), 3000)
+  }, 1000)
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function setConnected(ok) {
+  if (ok === connected) return
+  connected = ok
+  connDot.className = 'connected-dot' + (ok ? '' : ' off')
+}
+
+function setEstado(cls, txt) {
+  logo.className = 'orion-logo ' + cls
+  statusEl.textContent = txt
+  statusEl.className = 'orion-status' + (txt ? ' active' : '')
+}
+
+function addMessage(who, text) {
+  const wrap = document.createElement('div')
+  wrap.className = `message ${who}`
+  wrap.innerHTML = `
+    <span class="message-label">${who === 'orion' ? 'ORION' : 'Tú'}</span>
+    <div class="message-bubble">${text}</div>
+  `
+  messages.appendChild(wrap)
+  messages.scrollTop = messages.scrollHeight
+}
+
+function showTyping() {
+  if (typing) return
+  typing = document.createElement('div')
+  typing.className = 'message orion message-typing'
+  typing.innerHTML = `
+    <span class="message-label">ORION</span>
+    <div class="message-bubble"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+  `
+  messages.appendChild(typing)
+  messages.scrollTop = messages.scrollHeight
+}
+
+function hideTyping() {
+  if (typing) { typing.remove(); typing = null }
+}
+
+// ── Enviar comando ────────────────────────────────────────────────────────────
+async function sendCommand() {
+  const text = input.value.trim()
+  if (!text) return
+  input.value = ''
+  addMessage('user', text)
+  showTyping()
+  setEstado('procesando', 'Procesando...')
+
+  const res = await window.orion.execute(text)
+  hideTyping()
+
+  if (res.ok && res.data && res.data.message) {
+    addMessage('orion', res.data.message)
+    // Estado visual según acción
+    const action = res.data.action || ''
+    if (action.includes('WEB_SEARCH')) setEstado('web_search', 'Buscando...')
+    else if (action.includes('OPEN_APP')) setEstado('open_app', 'Abriendo...')
+    else if (action.includes('SYSTEM')) setEstado('system_control', 'Ejecutando...')
+    else if (action.includes('SMALL_TALK')) setEstado('hablando', 'Respondiendo...')
+    else setEstado('idle', 'Esperando...')
+  } else {
+    addMessage('orion', 'No pude conectar con ORION.')
+    setEstado('error', 'Error de conexión')
+  }
+
+  setTimeout(() => setEstado('idle', 'Esperando...'), 3000)
+}
+
+document.getElementById('btn-send').onclick = sendCommand
+input.addEventListener('keydown', e => { if (e.key === 'Enter') sendCommand() })
+
+// ── Panel de control ──────────────────────────────────────────────────────────
+const overlay   = document.getElementById('panel-overlay')
+const btnPanel  = document.getElementById('btn-panel')
+const btnClose  = document.getElementById('panel-close')
+
+btnPanel.onclick = async () => {
+  overlay.classList.add('visible')
+  // Cargar stats
+  const stats = await window.orion.getStats()
+  if (stats.ok) {
+    document.getElementById('stat-total').textContent  = stats.data.total_commands ?? '—'
+    document.getElementById('stat-errors').textContent = stats.data.total_errors  ?? '—'
+    document.getElementById('stat-apps').textContent   = stats.data.total_apps    ?? '—'
+  }
+  // Cargar historial
+  const cmds = await window.orion.getCommands(50)
+  const hist = document.getElementById('panel-history')
+  if (cmds.ok && cmds.data.length) {
+    hist.innerHTML = cmds.data.map(item => {
+      const intent = item.intent || 'UNKNOWN'
+      const text   = item.raw_text || item.payload || '—'
+      const time   = item.created_at
+        ? new Date(item.created_at).toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' })
+        : ''
+      return `
+        <div class="history-item">
+          <span class="history-intent intent-${intent}">${intent.replace('_',' ')}</span>
+          <span class="history-text">${text.substring(0, 80)}</span>
+          <span class="history-time">${time}</span>
+        </div>
+      `
+    }).join('')
+  } else {
+    hist.innerHTML = '<div style="color:#3a4060;font-size:12px;text-align:center;padding:20px;">Sin historial</div>'
+  }
+}
+
+btnClose.onclick = () => overlay.classList.remove('visible')
+overlay.onclick = e => { if (e.target === overlay) overlay.classList.remove('visible') }
+
+// ── Polling solo para estado de conexión ─────────────────────────────────────
+async function checkConnection() {
+  const res = await window.orion.getCommands(1)
+  setConnected(res.ok)
+}
+setInterval(checkConnection, 3000)
+checkConnection()
+
+// ── Web Speech API ────────────────────────────────────────────────────────────
+function iniciarReconocimientoVoz() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    console.log('[Voz] Web Speech API no disponible')
+    return
+  }
+  const SR  = window.SpeechRecognition || window.webkitSpeechRecognition
+  const rec = new SR()
+  rec.lang           = 'es-MX'
+  rec.continuous     = true
+  rec.interimResults = false
+
+  rec.onresult = async (event) => {
+    const texto = event.results[event.results.length - 1][0].transcript.toLowerCase().trim()
+    console.log('[Voz] Oído:', texto)
+    if (!texto.includes('orion') && !texto.includes('orión')) return
+    let comando = texto.replace(/orión?[,\s]*/gi, '').trim()
+    if (!comando || comando.length < 2) return
+    console.log('[Voz] Comando:', comando)
+    window.orion.notifyOverlay('procesando')
+    addMessage('user', comando)
+    showTyping()
+    const res = await window.orion.execute(comando)
+    hideTyping()
+    if (res.ok && res.data && res.data.message) {
+      addMessage('orion', res.data.message)
+      const action = res.data.action || ''
+      if (action.includes('WEB_SEARCH'))    window.orion.notifyOverlay('web_search')
+      else if (action.includes('OPEN_APP')) window.orion.notifyOverlay('open_app')
+      else if (action.includes('SYSTEM'))   window.orion.notifyOverlay('system_control')
+      else window.orion.notifyOverlay('hablando')
+    } else {
+      addMessage('orion', 'No pude procesar ese comando.')
+      window.orion.notifyOverlay('error')
+    }
+  }
+  rec.onerror = (e) => {
+    if (e.error !== 'no-speech') setTimeout(iniciarReconocimientoVoz, 1000)
+  }
+  rec.onend = () => setTimeout(iniciarReconocimientoVoz, 300)
+  rec.start()
+  console.log('[Voz] Reconocimiento iniciado')
+}
+iniciarReconocimientoVoz()
+</script>
+</body>
+</html>
