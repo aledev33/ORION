@@ -1,39 +1,19 @@
 # orion/tts/speaker.py
-#
-# TTS multiplataforma para ORION.
-# Detecta el sistema operativo automáticamente y usa el backend correcto:
-#   Windows  → pyttsx3 (SAPI5, sin dependencias extra)
-#   Linux    → Piper TTS (offline, voz natural) con fallback a espeak-ng
-#
-# En Raspberry Pi el backend Linux usa Piper.
-# En laptop Windows el backend Windows usa pyttsx3 igual que antes.
-
 from __future__ import annotations
 
 import io
 import os
 import subprocess
 import sys
+import threading
 import wave
 from pathlib import Path
 
-
-# ── Ruta al modelo Piper (solo Linux/RPi) ────────────────────────────────────
 _DEFAULT_MODEL = Path.home() / "piper-voices" / "es_MX-claude-high.onnx"
 _MODEL_PATH    = Path(os.getenv("PIPER_MODEL_PATH", str(_DEFAULT_MODEL)))
 
 
-# =============================================================================
-# Backend Windows — pyttsx3 / SAPI5
-# =============================================================================
-
 class _SpeakerWindows:
-    """
-    Backend TTS para Windows usando pyttsx3 (SAPI5).
-    Crea un engine nuevo por cada decir() para evitar
-    el error 'run loop already started' en loops.
-    """
-
     def __init__(self, rate: int, volume: float):
         self.rate   = rate
         self.volume = volume
@@ -56,29 +36,32 @@ class _SpeakerWindows:
         pass
 
 
-# =============================================================================
-# Backend Linux — Piper TTS con fallback a espeak-ng
-# =============================================================================
-
 class _SpeakerLinux:
-    """
-    Backend TTS para Linux / Raspberry Pi usando Piper.
-    Si Piper no está disponible, cae a espeak-ng como último recurso.
-    """
-
     def __init__(self, rate: int, volume: float):
         self.rate      = rate
         self.volume    = volume
         self._piper_ok = self._verificar_piper()
+        self._lock     = threading.Lock()  # evitar llamadas simultáneas a Piper
 
         if not self._piper_ok:
-            print(
-                "[Speaker][Linux] Piper no disponible. "
-                "Usando espeak-ng como fallback.\n"
-                "  → Instalar Piper: ver orion/tts/speaker.py para instrucciones."
-            )
+            print("[Speaker][Linux] Piper no disponible. Usando espeak-ng.")
+        else:
+            # Precalentar Piper en background para reducir latencia del primer uso
+            threading.Thread(target=self._precalentar, daemon=True).start()
 
-    # ── Verificación ──────────────────────────────────────────────────────────
+    def _precalentar(self):
+        """Lanza Piper con texto vacío para que cargue el modelo en memoria."""
+        try:
+            proc = subprocess.Popen(
+                ["piper-tts", "--model", str(_MODEL_PATH), "--output-raw"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            proc.communicate(input=b" ", timeout=10)
+            print("[Speaker][Linux] Piper precalentado.")
+        except Exception:
+            pass
 
     def _verificar_piper(self) -> bool:
         try:
@@ -93,23 +76,12 @@ class _SpeakerLinux:
             return False
 
         if not _MODEL_PATH.exists():
-            print(
-                f"[Speaker][Linux] Modelo Piper no encontrado en: {_MODEL_PATH}\n"
-                f"  Descárgalo con:\n"
-                f"  mkdir -p ~/piper-voices\n"
-                f"  wget -P ~/piper-voices https://huggingface.co/rhasspy/piper-voices"
-                f"/resolve/v1.0.0/es/es_MX/claude/high/es_MX-claude-high.onnx?download=true\n"
-                f"  wget -P ~/piper-voices https://huggingface.co/rhasspy/piper-voices"
-                f"/resolve/v1.0.0/es/es_MX/claude/high/es_MX-claude-high.onnx.json?download=true"
-            )
+            print(f"[Speaker][Linux] Modelo Piper no encontrado en: {_MODEL_PATH}")
             return False
 
         return True
 
-    # ── Reproducción ──────────────────────────────────────────────────────────
-
     def _reproducir_con_aplay(self, audio_bytes: bytes):
-        """Reproduce bytes WAV directamente con aplay (sin archivo temporal)."""
         proc = subprocess.Popen(
             ["aplay", "--quiet", "-"],
             stdin=subprocess.PIPE,
@@ -119,14 +91,14 @@ class _SpeakerLinux:
         proc.communicate(input=audio_bytes)
 
     def _decir_piper(self, texto: str):
-        """Genera audio con Piper y lo reproduce con aplay."""
-        proc_piper = subprocess.Popen(
-            ["piper-tts", "--model", str(_MODEL_PATH), "--output-raw"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
-        pcm_data, _ = proc_piper.communicate(input=texto.encode("utf-8"))
+        with self._lock:
+            proc_piper = subprocess.Popen(
+                ["piper-tts", "--model", str(_MODEL_PATH), "--output-raw"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            pcm_data, _ = proc_piper.communicate(input=texto.encode("utf-8"))
 
         if not pcm_data:
             return
@@ -141,7 +113,6 @@ class _SpeakerLinux:
         self._reproducir_con_aplay(wav_buffer.getvalue())
 
     def _decir_espeak(self, texto: str):
-        """Fallback: espeak-ng."""
         subprocess.run(
             ["espeak-ng", "-v", "es", "-s", "150", texto],
             stdout=subprocess.DEVNULL,
@@ -163,17 +134,7 @@ class _SpeakerLinux:
         pass
 
 
-# =============================================================================
-# Speaker — interfaz pública (el resto del proyecto no cambia)
-# =============================================================================
-
 class Speaker:
-    """
-    Interfaz única de TTS para ORION.
-    Selecciona el backend correcto según el sistema operativo en tiempo de
-    inicialización. El resto del proyecto solo llama a decir() y cerrar().
-    """
-
     def __init__(self, rate: int = 175, volume: float = 1.0):
         if sys.platform == "win32":
             print("[Speaker] Backend: Windows (pyttsx3)")

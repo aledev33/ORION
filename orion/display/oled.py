@@ -1,26 +1,14 @@
 # orion/display/oled.py
 #
-# Módulo de pantalla OLED SSD1306 para ORION Robot.
-# Cada estado tiene una animación visualmente distinta.
-# Pantalla 128x64 monocromática (franja amarilla ~16px arriba, azul resto).
-#
-# Estados y su diseño visual:
-#   INACTIVO       → cara durmiendo, ojos parpadeando lento, zZz flotante
-#   ESCUCHANDO     → cara atenta, ondas de sonido animadas
-#   PROCESANDO     → cara pensativa, spinner de puntos rotando
-#   WEB_SEARCH     → cara curiosa, barra de progreso animada + lupa
-#   OPEN_APP       → cara emocionada, flechas animadas apuntando arriba
-#   SYSTEM_CONTROL → pantalla INVERTIDA, cara técnica, bordes parpadeando
-#   SMALL_TALK     → cara feliz, corazones/estrellas flotando
-#   HABLANDO       → cara con boca animada, ondas de audio laterales
-#   ERROR          → pantalla INVERTIDA, cara asustada, X parpadeando
-#   APAGANDO       → cara cerrando ojos gradualmente, fade de puntos
+# Pantalla OLED SSD1306 128x64 para ORION.
+# Animaciones temáticas por estado.
+# Fix: lock de estado para evitar conflicto con llamadas externas.
 
 from __future__ import annotations
 
+import math
 import threading
 import time
-import math
 from enum import Enum, auto
 
 
@@ -33,6 +21,7 @@ class OrionEstado(Enum):
     SYSTEM_CONTROL = auto()
     SMALL_TALK     = auto()
     HABLANDO       = auto()
+    TAKE_PHOTO     = auto()
     ERROR          = auto()
     APAGANDO       = auto()
 
@@ -42,41 +31,28 @@ _INTENT_A_ESTADO = {
     "OPEN_APP":       OrionEstado.OPEN_APP,
     "SYSTEM_CONTROL": OrionEstado.SYSTEM_CONTROL,
     "SMALL_TALK":     OrionEstado.SMALL_TALK,
+    "TAKE_PHOTO":     OrionEstado.TAKE_PHOTO,
     "EXIT":           OrionEstado.APAGANDO,
     "UNKNOWN":        OrionEstado.ERROR,
     "LOW_CONFIDENCE": OrionEstado.ERROR,
 }
 
-# Zona amarilla: filas 0-15 (header)
-# Zona azul:    filas 16-63 (cara + animación)
-_HEADER_Y   = 4    # y del texto en zona amarilla
-_CARA_Y     = 22   # y base de la cara
-_ANIM_Y     = 46   # y base de la animación
-
 
 class OrionDisplay:
-    """
-    Controlador OLED SSD1306 con animaciones por estado.
-    Tolerante a fallos: si no hay pantalla, ORION sigue funcionando.
-    """
-
     def __init__(self, i2c_address: int = 0x3C, i2c_port: int = 1):
-        self._device       = None
-        self._font_sm      = None   # 9px — texto normal
-        self._font_md      = None   # 12px — cara
-        self._lock         = threading.Lock()
+        self._device      = None
+        self._font_sm     = None
+        self._font_md     = None
+        self._lock        = threading.Lock()
         self._estado_actual = OrionEstado.INACTIVO
-        self._frame        = 0      # contador de frames para animaciones
-        self._anim_thread  = None
+        self._frame       = 0
         self._anim_running = False
+        self._anim_thread  = None
         self._reset_timer  = None
+        self._locked_until = 0.0  # timestamp hasta cuando está bloqueado
         self._inicializar(i2c_address, i2c_port)
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Inicialización
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _inicializar(self, address: int, port: int):
+    def _inicializar(self, address, port):
         try:
             from luma.core.interface.serial import i2c
             from luma.oled.device import ssd1306
@@ -88,276 +64,293 @@ class OrionDisplay:
             font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
             try:
                 self._font_sm = ImageFont.truetype(font_path, 9)
-                self._font_md = ImageFont.truetype(font_path, 11)
+                self._font_md = ImageFont.truetype(font_path, 12)
             except Exception:
                 self._font_sm = ImageFont.load_default()
                 self._font_md = ImageFont.load_default()
 
-            print("[Display] OLED SSD1306 inicializada.")
-            self._iniciar_animacion()
+            print("[Display] OLED inicializada.")
+            self._anim_running = True
+            self._anim_thread  = threading.Thread(target=self._loop, daemon=True)
+            self._anim_thread.start()
             self.set_estado(OrionEstado.INACTIVO)
 
         except ImportError:
-            print("[Display] luma.oled no instalado. OLED no disponible.")
+            print("[Display] luma.oled no instalado.")
         except Exception as e:
-            print(f"[Display] No se pudo inicializar OLED: {e}")
+            print(f"[Display] Error: {e}")
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Loop de animación (hilo dedicado)
-    # ─────────────────────────────────────────────────────────────────────────
+    # ── Loop de animación ─────────────────────────────────────────────────────
 
-    def _iniciar_animacion(self):
-        self._anim_running = True
-        self._anim_thread = threading.Thread(
-            target=self._loop_animacion, daemon=True
-        )
-        self._anim_thread.start()
-
-    def _loop_animacion(self):
+    def _loop(self):
         while self._anim_running:
-            if self._device is not None:
-                self._renderizar(self._estado_actual, self._frame)
-                self._frame += 1
-            time.sleep(0.18)   # ~5.5 fps — suave pero no agresivo
+            if self._device:
+                # Solo renderizar si no está bloqueado externamente
+                if time.time() >= self._locked_until:
+                    self._renderizar(self._estado_actual, self._frame)
+                    self._frame += 1
+            time.sleep(0.15)
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Helpers de dibujo
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _centrar_texto(self, draw, texto: str, y: int, font, fill="white"):
-        bbox  = draw.textbbox((0, 0), texto, font=font)
-        ancho = bbox[2] - bbox[0]
-        x     = max(0, (128 - ancho) // 2)
-        draw.text((x, y), texto, fill=fill, font=font)
-
-    def _dibujar_cara(self, draw, ojo_izq: str, ojo_der: str,
-                      boca: str, y_base: int, font, fill="white"):
-        """Dibuja una cara estilo ASCII centrada."""
-        cara = f"({ojo_izq}.{ojo_der})"
-        self._centrar_texto(draw, cara, y_base, font, fill)
-        self._centrar_texto(draw, boca, y_base + 13, font, fill)
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Renderizador por estado
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _renderizar(self, estado: OrionEstado, frame: int):
-        if self._device is None:
+    def _renderizar(self, estado, f):
+        if not self._device:
             return
         try:
             from luma.core.render import canvas
             with self._lock:
                 with canvas(self._device) as draw:
-                    self._dibujar_estado(draw, estado, frame)
+                    self._dibujar(draw, estado, f)
         except Exception as e:
-            print(f"[Display] Error render: {e}")
+            print(f"[Display] Render error: {e}")
 
-    def _dibujar_estado(self, draw, estado: OrionEstado, f: int):
-        """Despachador principal — cada estado tiene su propia función."""
-        fn = {
-            OrionEstado.INACTIVO:       self._estado_inactivo,
-            OrionEstado.ESCUCHANDO:     self._estado_escuchando,
-            OrionEstado.PROCESANDO:     self._estado_procesando,
-            OrionEstado.WEB_SEARCH:     self._estado_web_search,
-            OrionEstado.OPEN_APP:       self._estado_open_app,
-            OrionEstado.SYSTEM_CONTROL: self._estado_system_control,
-            OrionEstado.SMALL_TALK:     self._estado_small_talk,
-            OrionEstado.HABLANDO:       self._estado_hablando,
-            OrionEstado.ERROR:          self._estado_error,
-            OrionEstado.APAGANDO:       self._estado_apagando,
-        }.get(estado, self._estado_inactivo)
-        fn(draw, f)
+    # ── Helpers ───────────────────────────────────────────────────────────────
 
-    # ── INACTIVO ─────────────────────────────────────────────────────────────
-    # Cara durmiendo, ojos parpadeando muy lento, zZz flotando
-    def _estado_inactivo(self, draw, f: int):
-        self._centrar_texto(draw, "ORION", _HEADER_Y, self._font_sm)
-        # Ojos: abiertos la mayoría del tiempo, cerrados cada 20 frames
-        if f % 20 < 2:
-            ojo = "—"
+    def _centro(self, draw, texto, y, font, fill="white"):
+        bbox  = draw.textbbox((0, 0), texto, font=font)
+        ancho = bbox[2] - bbox[0]
+        x     = max(0, (128 - ancho) // 2)
+        draw.text((x, y), texto, fill=fill, font=font)
+
+    # ── Despachador ───────────────────────────────────────────────────────────
+
+    def _dibujar(self, draw, estado, f):
+        {
+            OrionEstado.INACTIVO:       self._inactivo,
+            OrionEstado.ESCUCHANDO:     self._escuchando,
+            OrionEstado.PROCESANDO:     self._procesando,
+            OrionEstado.WEB_SEARCH:     self._web_search,
+            OrionEstado.OPEN_APP:       self._open_app,
+            OrionEstado.SYSTEM_CONTROL: self._system_control,
+            OrionEstado.SMALL_TALK:     self._small_talk,
+            OrionEstado.HABLANDO:       self._hablando,
+            OrionEstado.TAKE_PHOTO:     self._take_photo,
+            OrionEstado.ERROR:          self._error,
+            OrionEstado.APAGANDO:       self._apagando,
+        }.get(estado, self._inactivo)(draw, f)
+
+    # ── INACTIVO — carita durmiendo ───────────────────────────────────────────
+    def _inactivo(self, draw, f):
+        # Cara grande centrada
+        cx, cy = 64, 28
+        draw.ellipse([cx-20, cy-18, cx+20, cy+18], outline="white", width=2)
+        # Ojos cerrados (líneas)
+        draw.line([cx-10, cy-4, cx-4, cy-4], fill="white", width=2)
+        draw.line([cx+4,  cy-4, cx+10, cy-4], fill="white", width=2)
+        # Boca dormida
+        draw.arc([cx-8, cy+4, cx+8, cy+14], 0, 180, fill="white", width=2)
+        # ZZZ animado flotando
+        z_y = 10 + int(math.sin(f * 0.15) * 3)
+        draw.text((90, z_y),     "z",   fill="white", font=self._font_sm)
+        draw.text((96, z_y - 6), "Z",   fill="white", font=self._font_md)
+        draw.text((104, z_y-13), "Z",   fill="white", font=self._font_md)
+        # Título
+        self._centro(draw, "ORION", 54, self._font_sm)
+
+    # ── ESCUCHANDO — ondas de sonido ──────────────────────────────────────────
+    def _escuchando(self, draw, f):
+        self._centro(draw, "Escuchando...", 2, self._font_sm)
+        # Micrófono centrado
+        cx, cy = 64, 28
+        draw.rounded_rectangle([cx-6, cy-14, cx+6, cy+6], radius=6, outline="white", width=2)
+        draw.line([cx, cy+6, cx, cy+14], fill="white", width=2)
+        draw.arc([cx-10, cy+4, cx+10, cy+18], 0, 180, fill="white", width=2)
+        # Ondas animadas
+        r1 = 16 + int(math.sin(f * 0.4) * 3)
+        r2 = 24 + int(math.sin(f * 0.4 + 1) * 3)
+        draw.arc([cx-r1, cy-r1, cx+r1, cy+r1], -60, 60, fill="white", width=1)
+        draw.arc([cx-r1, cy-r1, cx+r1, cy+r1], 120, 240, fill="white", width=1)
+        draw.arc([cx-r2, cy-r2, cx+r2, cy+r2], -60, 60, fill="white", width=1)
+        draw.arc([cx-r2, cy-r2, cx+r2, cy+r2], 120, 240, fill="white", width=1)
+
+    # ── PROCESANDO — spinner de puntos ────────────────────────────────────────
+    def _procesando(self, draw, f):
+        self._centro(draw, "Procesando...", 2, self._font_sm)
+        cx, cy = 64, 32
+        r = 18
+        for i in range(8):
+            angle  = math.radians(i * 45 - f * 8)
+            px     = int(cx + r * math.cos(angle))
+            py     = int(cy + r * math.sin(angle))
+            size   = 3 if i == 0 else (2 if i == 1 else 1)
+            opacity = "white" if i < 3 else "white"
+            draw.ellipse([px-size, py-size, px+size, py+size], fill=opacity)
+        # Punto central pulsando
+        ps = int(3 + math.sin(f * 0.3) * 2)
+        draw.ellipse([cx-ps, cy-ps, cx+ps, cy+ps], outline="white", width=1)
+
+    # ── WEB_SEARCH — globo terráqueo + cursor ────────────────────────────────
+    def _web_search(self, draw, f):
+        self._centro(draw, "Buscando...", 2, self._font_sm)
+        cx, cy = 64, 34
+        r = 20
+        # Globo
+        draw.ellipse([cx-r, cy-r, cx+r, cy+r], outline="white", width=2)
+        # Meridianos
+        draw.ellipse([cx-r//2, cy-r, cx+r//2, cy+r], outline="white", width=1)
+        # Ecuador
+        draw.line([cx-r, cy, cx+r, cy], fill="white", width=1)
+        # Cursor de búsqueda animado (gira alrededor del globo)
+        angle = math.radians(f * 5)
+        ex = int(cx + (r+6) * math.cos(angle))
+        ey = int(cy + (r+6) * math.sin(angle))
+        draw.ellipse([ex-3, ey-3, ex+3, ey+3], outline="white", width=2)
+        draw.line([ex+2, ey+2, ex+6, ey+6], fill="white", width=2)
+
+    # ── OPEN_APP — ventana con flechas ───────────────────────────────────────
+    def _open_app(self, draw, f):
+        self._centro(draw, "Abriendo app...", 2, self._font_sm)
+        cx, cy = 64, 34
+        # Ventana
+        draw.rectangle([cx-22, cy-16, cx+22, cy+16], outline="white", width=2)
+        draw.line([cx-22, cy-8, cx+22, cy-8], fill="white", width=1)
+        # Puntos de la barra de título
+        for i, x in enumerate([cx-16, cx-10, cx-4]):
+            draw.ellipse([x-2, cy-13, x+2, cy-9], fill="white")
+        # Flecha de lanzar animada
+        offset = (f * 2) % 12
+        arrow_y = cy + 4 - offset
+        if cy - 8 <= arrow_y <= cy + 12:
+            draw.polygon([
+                (cx, arrow_y - 4),
+                (cx - 5, arrow_y + 4),
+                (cx + 5, arrow_y + 4),
+            ], fill="white")
+
+    # ── SYSTEM_CONTROL — engranaje girando ───────────────────────────────────
+    def _system_control(self, draw, f):
+        self._centro(draw, "Ejecutando...", 2, self._font_sm)
+        cx, cy = 64, 34
+        r_out, r_in = 18, 10
+        dientes = 8
+        angulo_base = math.radians(f * 4)
+        # Dientes del engranaje
+        puntos = []
+        for i in range(dientes * 2):
+            ang = angulo_base + math.radians(i * 360 / (dientes * 2))
+            r   = r_out if i % 2 == 0 else r_out - 5
+            puntos.append((int(cx + r * math.cos(ang)), int(cy + r * math.sin(ang))))
+        if len(puntos) >= 3:
+            draw.polygon(puntos, outline="white")
+        # Centro del engranaje
+        draw.ellipse([cx-r_in, cy-r_in, cx+r_in, cy+r_in], outline="white", width=2)
+        # Punto central
+        draw.ellipse([cx-3, cy-3, cx+3, cy+3], fill="white")
+
+    # ── SMALL_TALK — carita hablando con burbuja ──────────────────────────────
+    def _small_talk(self, draw, f):
+        cx, cy = 45, 32
+        # Cara
+        draw.ellipse([cx-18, cy-18, cx+18, cy+18], outline="white", width=2)
+        # Ojos alegres
+        draw.ellipse([cx-9, cy-7, cx-3, cy-1], fill="white")
+        draw.ellipse([cx+3, cy-7, cx+9, cy-1], fill="white")
+        # Boca hablando (abre y cierra)
+        boca_h = int(4 + math.sin(f * 0.4) * 4)
+        draw.ellipse([cx-8, cy+4, cx+8, cy+4+boca_h], outline="white", width=2)
+        # Burbuja de chat
+        draw.rounded_rectangle([70, 14, 122, 42], radius=6, outline="white", width=2)
+        # Puntos animados en la burbuja
+        dot_idx = (f // 5) % 3
+        for i, dx in enumerate([80, 92, 104]):
+            if i <= dot_idx:
+                draw.ellipse([dx-3, 25, dx+3, 31], fill="white")
+        # Cola de la burbuja
+        draw.polygon([(70, 35), (64, 42), (76, 42)], fill="white")
+
+    # ── HABLANDO — ondas de audio ─────────────────────────────────────────────
+    def _hablando(self, draw, f):
+        self._centro(draw, "ORION", 2, self._font_sm)
+        # Barras de ecualizador
+        base_y = 56
+        barras = 12
+        ancho_b = 8
+        espacio = 2
+        total = barras * (ancho_b + espacio) - espacio
+        x_start = (128 - total) // 2
+        for i in range(barras):
+            h = int(8 + 28 * abs(math.sin(f * 0.3 + i * 0.5)))
+            x = x_start + i * (ancho_b + espacio)
+            draw.rectangle([x, base_y - h, x + ancho_b, base_y], fill="white")
+
+    # ── TAKE_PHOTO — cámara con cuenta regresiva ──────────────────────────────
+    def _take_photo(self, draw, f):
+        self._centro(draw, "Foto...", 2, self._font_sm)
+        cx, cy = 64, 34
+        # Cuerpo de la cámara
+        draw.rounded_rectangle([cx-24, cy-12, cx+24, cy+14], radius=4, outline="white", width=2)
+        # Lente
+        draw.ellipse([cx-10, cy-8, cx+10, cy+8], outline="white", width=2)
+        draw.ellipse([cx-6, cy-4, cx+6, cy+4], fill="white")
+        # Flash
+        draw.rectangle([cx+16, cy-14, cx+22, cy-10], fill="white")
+        # Parpadeo animado
+        if f % 10 < 5:
+            draw.ellipse([cx-3, cy-3+2, cx+3, cy+3+2], outline="black", width=1)
+
+    # ── ERROR — carita asustada ────────────────────────────────────────────────
+    def _error(self, draw, f):
+        # Pantalla invertida parpadeante
+        if f % 8 < 4:
+            draw.rectangle([0, 0, 127, 63], fill="white")
+            fill = "black"
         else:
-            ojo = "-"
-        self._dibujar_cara(draw, ojo, ojo, "  ~~~  ", _CARA_Y, self._font_md)
-        # zZz flotando (sube y baja)
-        z_texts = ["z", "zZ", "zZz"]
-        z_idx   = (f // 8) % 3
-        z_y     = _ANIM_Y + int(math.sin(f * 0.3) * 3)
-        self._centrar_texto(draw, z_texts[z_idx], z_y, self._font_sm)
+            fill = "white"
+        cx, cy = 64, 28
+        draw.ellipse([cx-20, cy-18, cx+20, cy+18], outline=fill, width=2)
+        # Ojos asustados (X X)
+        for ox in [cx-10, cx+4]:
+            draw.line([ox, cy-8, ox+6, cy-2], fill=fill, width=2)
+            draw.line([ox+6, cy-8, ox, cy-2], fill=fill, width=2)
+        # Boca abierta asustada
+        draw.ellipse([cx-8, cy+4, cx+8, cy+14], outline=fill, width=2)
+        self._centro(draw, "No entendi", 54, self._font_sm)
 
-    # ── ESCUCHANDO ───────────────────────────────────────────────────────────
-    # Cara atenta, ondas de sonido animadas a los lados
-    def _estado_escuchando(self, draw, f: int):
-        self._centrar_texto(draw, "ORION", _HEADER_Y, self._font_sm)
-        self._dibujar_cara(draw, "o", "o", " Escucho ", _CARA_Y, self._font_md)
-        # Ondas de sonido: barras verticales que pulsan
-        alturas = [3, 6, 9, 6, 3]
-        base_y  = _ANIM_Y + 8
-        x_start = 24
-        for i, h_base in enumerate(alturas):
-            h = h_base + int(math.sin(f * 0.4 + i * 0.7) * 3)
-            x = x_start + i * 6
-            draw.rectangle([x, base_y - h, x + 3, base_y], fill="white")
-        # Lado derecho (espejo)
-        x_start_r = 128 - 24 - 5 * 6
-        for i, h_base in enumerate(alturas):
-            h = h_base + int(math.sin(f * 0.4 + i * 0.7 + math.pi) * 3)
-            x = x_start_r + i * 6
-            draw.rectangle([x, base_y - h, x + 3, base_y], fill="white")
+    # ── APAGANDO ──────────────────────────────────────────────────────────────
+    def _apagando(self, draw, f):
+        # Ojos cerrándose
+        fase = min(f // 2, 8)
+        cx, cy = 64, 28
+        draw.ellipse([cx-20, cy-18, cx+20, cy+18], outline="white", width=2)
+        ojo_h = max(0, 6 - fase)
+        if ojo_h > 0:
+            draw.ellipse([cx-12, cy-5, cx-4, cy-5+ojo_h], fill="white")
+            draw.ellipse([cx+4,  cy-5, cx+12, cy-5+ojo_h], fill="white")
+        else:
+            draw.line([cx-12, cy-2, cx-4, cy-2], fill="white", width=2)
+            draw.line([cx+4,  cy-2, cx+12, cy-2], fill="white", width=2)
+        draw.arc([cx-8, cy+4, cx+8, cy+12], 0, 180, fill="white", width=2)
+        puntos = max(0, 5 - f // 3)
+        self._centro(draw, "Bye" + "." * puntos, 54, self._font_sm)
 
-    # ── PROCESANDO ───────────────────────────────────────────────────────────
-    # Cara pensativa, spinner de puntos orbitando
-    def _estado_procesando(self, draw, f: int):
-        self._centrar_texto(draw, "ORION", _HEADER_Y, self._font_sm)
-        self._dibujar_cara(draw, "*", "*", " . . . ", _CARA_Y, self._font_md)
-        # Spinner circular de 6 puntos
-        cx, cy = 64, _ANIM_Y + 6
-        r = 7
-        for i in range(6):
-            angle   = (f * 0.2 + i * math.pi / 3)
-            px      = int(cx + r * math.cos(angle))
-            py      = int(cy + r * math.sin(angle))
-            # Los puntos más "adelante" son más grandes
-            size = 2 if i == (f // 3) % 6 else 1
-            draw.ellipse([px - size, py - size, px + size, py + size], fill="white")
+    # ── API pública ───────────────────────────────────────────────────────────
 
-    # ── WEB_SEARCH ───────────────────────────────────────────────────────────
-    # Cara curiosa, barra de progreso corriendo + lupa
-    def _estado_web_search(self, draw, f: int):
-        self._centrar_texto(draw, "ORION", _HEADER_Y, self._font_sm)
-        self._dibujar_cara(draw, "^", "^", "Buscando", _CARA_Y, self._font_md)
-        # Barra de progreso animada
-        bx, by = 10, _ANIM_Y + 4
-        bw, bh = 108, 6
-        draw.rectangle([bx, by, bx + bw, by + bh], outline="white")
-        prog = (f * 4) % (bw + 20) - 10   # bloque que corre
-        x1   = max(bx + 1, bx + prog)
-        x2   = min(bx + bw - 1, bx + prog + 25)
-        if x1 < x2:
-            draw.rectangle([x1, by + 1, x2, by + bh - 1], fill="white")
-        # Lupa pequeña a la derecha
-        draw.ellipse([100, _ANIM_Y - 2, 112, _ANIM_Y + 10], outline="white")
-        draw.line([111, _ANIM_Y + 9, 115, _ANIM_Y + 13], fill="white", width=2)
-
-    # ── OPEN_APP ─────────────────────────────────────────────────────────────
-    # Cara emocionada, flechas subiendo animadas
-    def _estado_open_app(self, draw, f: int):
-        self._centrar_texto(draw, "ORION", _HEADER_Y, self._font_sm)
-        self._dibujar_cara(draw, ">", "<", "Abriendo", _CARA_Y, self._font_md)
-        # 3 flechas subiendo con offset de fase
-        for i, x in enumerate([30, 60, 90]):
-            offset = (f * 2 + i * 8) % 18
-            y      = _ANIM_Y + 12 - offset
-            if _ANIM_Y <= y <= _ANIM_Y + 12:
-                draw.text((x - 3, y), "^", fill="white", font=self._font_sm)
-
-    # ── SYSTEM_CONTROL ───────────────────────────────────────────────────────
-    # Pantalla INVERTIDA, cara técnica, bordes parpadeantes
-    def _estado_system_control(self, draw, f: int):
-        # Fondo blanco (invertido)
-        draw.rectangle([0, 0, 127, 63], fill="white")
-        self._centrar_texto(draw, "ORION", _HEADER_Y, self._font_sm, fill="black")
-        # Cara en negro sobre blanco
-        cara = "(#.#)"
-        self._centrar_texto(draw, cara, _CARA_Y, self._font_md, fill="black")
-        self._centrar_texto(draw, "SISTEMA", _CARA_Y + 13, self._font_sm, fill="black")
-        # Bordes parpadeando
-        if f % 6 < 3:
-            draw.rectangle([0, 0, 127, 63], outline="black")
-            draw.rectangle([2, 2, 125, 61], outline="black")
-        # Texto técnico parpadeante
-        if f % 4 < 2:
-            draw.text((4, _ANIM_Y + 2), ">>>", fill="black", font=self._font_sm)
-            draw.text((90, _ANIM_Y + 2), "<<<", fill="black", font=self._font_sm)
-
-    # ── SMALL_TALK ───────────────────────────────────────────────────────────
-    # Cara feliz, estrellas/destellos flotando
-    def _estado_small_talk(self, draw, f: int):
-        self._centrar_texto(draw, "ORION", _HEADER_Y, self._font_sm)
-        # Boca alternando entre sonrisa y super-sonrisa
-        boca = " \\___/ " if f % 10 < 5 else "  ~~~  "
-        self._dibujar_cara(draw, "^", "^", boca, _CARA_Y, self._font_md)
-        # Estrellitas flotando en 3 posiciones fijas con fase distinta
-        estrellas = [(15, _ANIM_Y), (64, _ANIM_Y - 4), (110, _ANIM_Y)]
-        simbolos  = ["*", "+", "*"]
-        for i, (sx, sy) in enumerate(estrellas):
-            fase = (f + i * 7) % 14
-            if fase < 7:
-                draw.text((sx, sy + fase // 2), simbolos[i],
-                          fill="white", font=self._font_sm)
-
-    # ── HABLANDO ─────────────────────────────────────────────────────────────
-    # Cara con boca animada, ondas de audio a ambos lados
-    def _estado_hablando(self, draw, f: int):
-        self._centrar_texto(draw, "ORION", _HEADER_Y, self._font_sm)
-        # Boca animada: abre y cierra
-        bocas = [" ----- ", " ~---~ ", " ~~~~~ ", " ~---~ "]
-        boca  = bocas[f % 4]
-        self._dibujar_cara(draw, "o", "o", boca, _CARA_Y, self._font_md)
-        # Ondas de audio simétricas más dinámicas que ESCUCHANDO
-        base_y = _ANIM_Y + 9
-        for i in range(7):
-            h = int(4 + 5 * abs(math.sin(f * 0.5 + i * 0.5)))
-            x = 10 + i * 6
-            draw.rectangle([x, base_y - h, x + 4, base_y], fill="white")
-        for i in range(7):
-            h = int(4 + 5 * abs(math.sin(f * 0.5 + i * 0.5 + 1.0)))
-            x = 128 - 14 - i * 6
-            draw.rectangle([x, base_y - h, x + 4, base_y], fill="white")
-
-    # ── ERROR ────────────────────────────────────────────────────────────────
-    # Pantalla INVERTIDA, cara asustada, X parpadeando en esquinas
-    def _estado_error(self, draw, f: int):
-        draw.rectangle([0, 0, 127, 63], fill="white")
-        self._centrar_texto(draw, "ORION", _HEADER_Y, self._font_sm, fill="black")
-        self._dibujar_cara(draw, "x", "x", "No entendi", _CARA_Y, self._font_md, fill="black")
-        # X parpadeante en las 4 esquinas
-        if f % 4 < 2:
-            for pos in [(2, 18), (118, 18), (2, 50), (118, 50)]:
-                draw.text(pos, "X", fill="black", font=self._font_sm)
-
-    # ── APAGANDO ─────────────────────────────────────────────────────────────
-    # Ojos cerrándose gradualmente, puntos desvaneciéndose
-    def _estado_apagando(self, draw, f: int):
-        self._centrar_texto(draw, "ORION", _HEADER_Y, self._font_sm)
-        # Ojos cerrándose: pasan de 'o' a '-' gradualmente
-        ojos_seq = ["o", "o", "-", "-", "·", "·", " ", " "]
-        ojo = ojos_seq[min(f // 3, len(ojos_seq) - 1)]
-        self._dibujar_cara(draw, ojo, ojo, "  Bye...  ", _CARA_Y, self._font_md)
-        # Puntos que se apagan uno a uno
-        puntos_total = max(0, 5 - f // 4)
-        texto_puntos = "· " * puntos_total
-        self._centrar_texto(draw, texto_puntos, _ANIM_Y + 2, self._font_sm)
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # API pública
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def set_estado(self, estado: OrionEstado, auto_reset_seg: float = 0):
+    def set_estado(self, estado: OrionEstado, auto_reset_seg: float = 0, lock_seg: float = 0):
         self._estado_actual = estado
-        self._frame = 0   # reinicia animación al cambiar estado
+        self._frame = 0
 
-        if self._reset_timer is not None:
+        # Lock: bloquear el loop para que no pise este estado
+        if lock_seg > 0:
+            self._locked_until = time.time() + lock_seg
+
+        if self._reset_timer:
             self._reset_timer.cancel()
             self._reset_timer = None
 
         if auto_reset_seg > 0:
             self._reset_timer = threading.Timer(
-                auto_reset_seg,
-                self.set_estado,
-                args=(OrionEstado.INACTIVO,),
+                auto_reset_seg, self.set_estado, args=(OrionEstado.INACTIVO,)
             )
             self._reset_timer.daemon = True
             self._reset_timer.start()
 
-    def set_estado_por_intent(self, intent: str, auto_reset_seg: float = 5.0):
+    def set_estado_por_intent(self, intent: str, auto_reset_seg: float = 0):
         estado = _INTENT_A_ESTADO.get(intent, OrionEstado.PROCESANDO)
         self.set_estado(estado, auto_reset_seg=auto_reset_seg)
 
     def apagar(self):
         self._anim_running = False
-        if self._reset_timer is not None:
+        if self._reset_timer:
             self._reset_timer.cancel()
-        if self._device is not None:
+        if self._device:
             try:
                 self.set_estado(OrionEstado.APAGANDO)
                 time.sleep(1.5)

@@ -27,6 +27,13 @@ from orion.display.oled import OrionDisplay, OrionEstado
 import orion.config as config
 
 
+class _DisplayDummy:
+    """Display sin operaciones — usado en modo API para no tocar la OLED."""
+    def set_estado(self, *args, **kwargs): pass
+    def set_estado_por_intent(self, *args, **kwargs): pass
+    def apagar(self): pass
+
+
 class OrionAssistant:
     def __init__(self, modo_dev: bool = False):
         """
@@ -65,10 +72,14 @@ class OrionAssistant:
         ])
 
         # ── Pantalla OLED ─────────────────────────────────────────────────────
-        self.display = OrionDisplay(
-            i2c_address=config.OLED_I2C_ADDRESS,
-            i2c_port=config.OLED_I2C_PORT,
-        )
+        # En modo_dev (API) no inicializar OLED para evitar conflicto con orion.service
+        if not modo_dev:
+            self.display = OrionDisplay(
+                i2c_address=config.OLED_I2C_ADDRESS,
+                i2c_port=config.OLED_I2C_PORT,
+            )
+        else:
+            self.display = _DisplayDummy()
 
         # ── Contexto compartido ───────────────────────────────────────────────
         self.context = OrionContext(
@@ -187,7 +198,7 @@ class OrionAssistant:
 
         # Muestra HABLANDO mientras responde por voz
         # auto_reset vuelve a INACTIVO al terminar
-        self.display.set_estado(OrionEstado.HABLANDO, auto_reset_seg=8.0)
+        self.display.set_estado(OrionEstado.HABLANDO, auto_reset_seg=15.0)
         if speak:
             self.context.speaker.decir(result.message)
 

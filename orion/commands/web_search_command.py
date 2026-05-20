@@ -58,7 +58,7 @@ class WebSearchCommand(BaseCommand):
                 payload=tema,
             )
 
-        resumen = context.search_manager.resumir_es(texto, max_chars=500)
+        resumen = context.search_manager.resumir_es(texto, max_chars=250)
 
         return CommandResult(
             success=True,
