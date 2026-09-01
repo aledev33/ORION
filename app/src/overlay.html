@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 300px; height: 300px;
+  }
+  .bubble {
+    width: 280px; height: 280px;
+    margin: 10px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .glow {
+    position: absolute;
+    width: 280px; height: 280px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(80,140,255,0.12) 0%, transparent 70%);
+    animation: glow-pulse 3s ease-in-out infinite;
+    transition: background 0.5s;
+  }
+  @keyframes glow-pulse {
+    0%,100% { transform: scale(1); opacity: 0.5; }
+    50% { transform: scale(1.06); opacity: 1; }
+  }
+  .ring {
+    position: absolute;
+    width: 265px; height: 265px;
+    border-radius: 50%;
+    border: 3px solid transparent;
+    transition: border-color 0.4s;
+  }
+  .ring.escuchando     { border-color: rgba(0,220,100,0.9);   animation: ring-pulse 0.8s ease-in-out infinite; }
+  .ring.procesando     { border-color: rgba(80,160,255,0.9);  animation: ring-spin 1.5s linear infinite; }
+  .ring.hablando       { border-color: rgba(180,80,255,0.9);  animation: ring-pulse 0.6s ease-in-out infinite; }
+  .ring.web_search     { border-color: rgba(30,140,255,0.9); }
+  .ring.open_app       { border-color: rgba(120,80,255,0.9); }
+  .ring.system_control { border-color: rgba(255,160,30,0.9); }
+  .ring.error          { border-color: rgba(255,60,60,0.9);   animation: ring-pulse 0.5s ease-in-out infinite; }
+  @keyframes ring-pulse {
+    0%,100% { transform: scale(1); opacity: 0.7; }
+    50% { transform: scale(1.03); opacity: 1; }
+  }
+  @keyframes ring-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  .logo {
+    width: 240px; height: 240px;
+    border-radius: 50%;
+    object-fit: cover;
+    opacity: 0.70;
+    position: relative; z-index: 2;
+    animation: float 4s ease-in-out infinite;
+    transition: filter 0.4s;
+  }
+  @keyframes float {
+    0%,100% { transform: translateY(0); }
+    50%      { transform: translateY(-8px); }
+  }
+  .logo.escuchando { filter: drop-shadow(0 0 20px rgba(0,220,100,0.8)); }
+  .logo.procesando { filter: drop-shadow(0 0 20px rgba(80,160,255,0.8)); }
+  .logo.hablando   { filter: drop-shadow(0 0 20px rgba(180,80,255,0.8)); animation: float 0.8s ease-in-out infinite; }
+  .logo.error      { filter: drop-shadow(0 0 20px rgba(255,60,60,0.8)); }
+</style>
+</head>
+<body>
+<div class="bubble">
+  <div class="glow" id="glow"></div>
+  <div class="ring" id="ring"></div>
+  <img id="logo" class="logo" src="Logo_ORION.png" alt="ORION">
+</div>
+<script>
+const logo = document.getElementById('logo')
+const ring = document.getElementById('ring')
+const glow = document.getElementById('glow')
+
+const COLORES = {
+  escuchando:     'rgba(0,220,100,0.2)',
+  procesando:     'rgba(80,160,255,0.2)',
+  hablando:       'rgba(180,80,255,0.2)',
+  web_search:     'rgba(30,140,255,0.2)',
+  open_app:       'rgba(120,80,255,0.2)',
+  system_control: 'rgba(255,160,30,0.2)',
+  error:          'rgba(255,60,60,0.2)',
+}
+
+let resetTimer = null
+
+function setEstado(estado) {
+  logo.className = 'logo ' + (estado !== 'idle' ? estado : '')
+  ring.className = 'ring ' + (estado !== 'idle' ? estado : '')
+  glow.style.background = `radial-gradient(circle, ${COLORES[estado] || 'rgba(80,140,255,0.12)'} 0%, transparent 70%)`
+  if (resetTimer) clearTimeout(resetTimer)
+  if (estado !== 'idle') resetTimer = setTimeout(() => setEstado('idle'), 5000)
+}
+
+// ── Web Speech API ────────────────────────────────────────────────────────
+function iniciarEscucha() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  const rec = new SR()
+  rec.lang = 'es-MX'
+  rec.continuous = true
+  rec.interimResults = false
+
+  rec.onresult = (event) => {
+    const texto = event.results[event.results.length - 1][0].transcript.toLowerCase().trim()
+    if (!texto.includes('orion') && !texto.includes('orión')) return
+    let comando = texto.replace(/orion[,\s]*/gi, '').replace(/orión[,\s]*/gi, '').trim()
+    if (!comando || comando.length < 2) return
+    setEstado('procesando')
+    window.orion.execute(comando).then(res => {
+      if (!res.ok) { setEstado('error'); return }
+      const action = res.data?.action || ''
+      if (action.includes('WEB_SEARCH'))    setEstado('web_search')
+      else if (action.includes('OPEN_APP')) setEstado('open_app')
+      else if (action.includes('SYSTEM'))   setEstado('system_control')
+      else if (action.includes('SMALL') || action.includes('TAKE_PHOTO')) setEstado('hablando')
+      else if (!res.data?.success)          setEstado('error')
+    })
+  }
+  rec.onerror = (e) => { if (e.error !== 'no-speech') setTimeout(iniciarEscucha, 1000) }
+  rec.onend   = () => setTimeout(iniciarEscucha, 300)
+  rec.start()
+}
+
+window.orion.onEstado(setEstado)
+iniciarEscucha()
+</script>
+</body>
+</html>
